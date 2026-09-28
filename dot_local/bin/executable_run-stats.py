@@ -4,12 +4,13 @@ Usage : run-stats.py <session.jsonl>
 Compte les reponses (dedupliquees par message.id), les tokens, et les appels d'outils par nom."""
 import json, sys, collections
 
-vus, outils, modeles = set(), collections.Counter(), collections.Counter()
+vus, blocs_vus = set(), set()
+outils, modeles = collections.Counter(), collections.Counter()
 tok = collections.Counter()
 chars = collections.Counter()
 bash_cmds = collections.Counter()
 compactions = 0
-for ligne in open(sys.argv[1], encoding="utf-8"):
+for n, ligne in enumerate(open(sys.argv[1], encoding="utf-8")):
     try:
         e = json.loads(ligne)
     except json.JSONDecodeError:
@@ -19,9 +20,15 @@ for ligne in open(sys.argv[1], encoding="utf-8"):
     if e.get("type") != "assistant":
         continue
     m = e.get("message", {})
-    mid = m.get("id")
-    for bloc in m.get("content", []) or []:
+    mid = m.get("id") or f"_sans_id_{n}"   # sans id, la ligne est unique : jamais dedupliquee
+    # Une reponse est ecrite en plusieurs lignes qui se COMPLETENT (texte puis tool_use),
+    # elles ne se repetent pas : on parcourt toutes les lignes et on deduplique par bloc.
+    for i, bloc in enumerate(m.get("content", []) or []):
         t = bloc.get("type")
+        cle = bloc.get("id") or f"{mid}:{i}:{t}:{len(str(bloc))}"
+        if cle in blocs_vus:
+            continue
+        blocs_vus.add(cle)
         if t == "tool_use":
             outils[bloc.get("name", "?")] += 1
             if bloc.get("name") == "Bash":
@@ -31,7 +38,7 @@ for ligne in open(sys.argv[1], encoding="utf-8"):
             chars["reflexion"] += len(bloc.get("thinking", ""))
         elif t == "text":
             chars["texte"] += len(bloc.get("text", ""))
-    if mid in vus:          # une meme reponse est ecrite en plusieurs lignes : usage compte une fois
+    if mid in vus:      # usage cumulatif sur l'id : compte une seule fois
         continue
     vus.add(mid)
     modeles[m.get("model", "?")] += 1

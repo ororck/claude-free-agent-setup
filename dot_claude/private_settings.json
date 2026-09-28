@@ -20,7 +20,14 @@
       "Read(.env.*)",
       "Read(**/*.tfstate*)",
       "Read(~/.litellm/.env)",
-      "Read(~/.ssh/**)"
+      "Read(~/.ssh/**)",
+      "Read(secrets/**)",
+      "Read(**/id_rsa*)",
+      "Read(**/id_ed25519*)",
+      "Read(**/kubeconfig)",
+      "Read(.kube/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)"
     ],
     "defaultMode": "auto"
   },
@@ -68,6 +75,15 @@
           {
             "type": "command",
             "command": "/home/mohamed/.claude/hooks/guard-secrets.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/mohamed/.claude/hooks/guard-secrets-files.sh"
           }
         ]
       }

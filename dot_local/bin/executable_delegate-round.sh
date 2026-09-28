@@ -7,6 +7,7 @@
 set -uo pipefail
 
 OUT=.worker-out
+MAX_PAR=${MAX_PAR:-3}
 plan="${1:-}"
 [ -f "$plan" ] || { echo "Usage : delegate-round.sh <plan.txt>"; exit 1; }
 command -v delegate.sh >/dev/null || { echo "ECHEC : delegate.sh introuvable"; exit 1; }
@@ -30,12 +31,18 @@ hdr_split() {   # cree un pane et rend son identifiant, par difference de listes
 }
 
 taches=(); i=0
+declare -A vu=()
 while read -r worker consigne livrables; do
   [ -z "${worker:-}" ] && continue
   case "$worker" in \#*) continue ;; esac
   tache="$(basename "$consigne" .md)"; tache="${tache%.prompt}"
+  if [ -n "${vu[$tache]:-}" ]; then
+    echo "ECHEC : nom de tache en doublon dans le plan : $tache"; exit 1
+  fi
+  vu[$tache]=1
   log="$OUT/$tache.run.log"; : > "$log"
   dir=$([ $((i % 2)) -eq 0 ] && echo right || echo down)
+  while [ "$(jobs -rp | wc -l)" -ge "$MAX_PAR" ]; do wait -n; done
   # shellcheck disable=SC2086  # les livrables sont volontairement decoupes en arguments
   ( delegate.sh "$worker" "$consigne" $livrables > "$OUT/$tache.resume" 2>&1; echo $? > "$OUT/$tache.exit" ) &
   pid=$!

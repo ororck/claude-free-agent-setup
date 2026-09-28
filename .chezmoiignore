@@ -3,3 +3,4 @@
 **/*.bak-*
 **/__pycache__
 **/*.pyc
+.claude/hooks/guard-secrets.audit.log
