@@ -1,0 +1,9 @@
+# Spec ecrite une fois par Claude a partir du brief (seule partie qui coute des tokens)
+projet: relais
+services:
+  gateway:       {langage: go,     port: 8080, replicas: 2}
+  orders:        {langage: python, port: 8000, replicas: 3}
+  payments:      {langage: node,   port: null, replicas: 2}   # port absent du brief
+  notifications: {langage: python, port: 8001, replicas: 2, replicas_prod: 3}
+  web:           {langage: nginx,  port: 80,   replicas: 2}
+ressources: {cpu_req: 50m, mem_req: 64Mi, cpu_lim: 250m, mem_lim: 256Mi}

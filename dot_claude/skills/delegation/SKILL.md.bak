@@ -1,0 +1,59 @@
+---
+name: delegation
+description: Protocole pour deleguer une tache a des workers gratuits (OpenCode via LiteLLM dans des panes herdr) et la pre-verifier. Utiliser avant toute delegation.
+---
+
+# Delegation
+
+Objectif : economiser les tokens de l'orchestrateur. Garder pour toi les decisions, les taches critiques et la verification finale.
+
+## Couches, par ordre de preference
+1. Workers externes gratuits : OpenCode dans un pane herdr, modele via LiteLLM local. Pilotage via le skill herdr-lite.
+2. Sous-agents natifs, seulement si les workers externes sont indisponibles : Explore, spec-writer, doc-writer (haiku), implementer (sonnet).
+
+## Avant de deleguer
+- Verifier `HERDR_ENV=1` et `curl -sf http://localhost:4000/health/liveliness`. Si LiteLLM ne repond pas, prevenir l'utilisateur (commande `litellm-up`) et ne pas deleguer.
+- Si `~/.litellm/new-models.log` contient des entrees recentes, le signaler a l'utilisateur.
+- Noter le nombre de lignes de `~/.litellm/degraded.log`.
+
+## Quoi deleguer
+Uniquement une tache autonome, avec une specification complete, dont le resultat se verifie mecaniquement. Si tu ne peux pas ecrire ce que le worker doit produire, fais-le toi-meme.
+Jamais : decision d'architecture, arbitrage, operation irreversible, action sur une infra.
+
+## Choix du worker
+- worker-c (Gemma 4 31B, meilleur score code) : code, YAML, configs
+- worker-a (Nemotron 3 Ultra, meilleur en agentique) : taches multi-fichiers ou multi-etapes
+- worker-b (Qwen 3.8 27B) : redaction, documentation, le reste
+Trois workers maximum en parallele, un par nom.
+Demarrage, sans interface OpenCode : l'interface plante sous herdr (bug connu du rendu OpenTUI).
+1. Ecrire la consigne complete dans `.worker-out/<tache>.prompt.md`.
+2. Creer un pane herdr, puis y lancer, message AVANT `--file` :
+   `timeout 900 opencode run --model litellm/worker-X 'Suis exactement les instructions du fichier joint.' --file .worker-out/<tache>.prompt.md ; echo __FIN_<tache>_$?__`
+   Joindre le contenu avec `--file`, ne jamais demander au worker de lire un fichier par son chemin : il le resout mal.
+3. Attendre le marqueur avec `herdr pane wait-output <pane-id> --match __FIN_<tache>_`.
+4. Le code du marqueur indique seulement la fin du processus. 124 : delai depasse. 0 ne prouve PAS la reussite : un worker qui abandonne rend aussi 0. Seule la verification du livrable compte.
+
+## Ce que les workers peuvent faire
+Lire et ecrire des fichiers du projet, hors fichiers sensibles. Bash, web et acces hors du projet leur sont interdits par configuration. Ne leur demande jamais d'executer une commande. Ne jamais lancer OpenCode avec `--auto`.
+
+## Securite, non negociable
+- Aucun secret dans un prompt : ni cle, jeton, mot de passe, kubeconfig, identifiant d'abonnement, nom de ressource reel, ni donnee personnelle. Specification abstraite uniquement.
+- Fichiers intermediaires dans `.worker-out/` a la racine du projet, ajoute au `.gitignore`.
+- Demande de permission d'un worker : valider seul uniquement si elle porte sur un fichier du projet. Sinon, arreter et demander a l'utilisateur.
+
+## Pre-verification
+- Seulement si le rendu depasse environ 100 lignes ou plusieurs fichiers. En dessous, verifier directement.
+- Jamais sur une tache critique : verification complete par toi.
+- Lancer le verificateur de la meme facon, en joignant la specification et les fichiers produits : `timeout 900 opencode run --agent verifier 'Verifie les fichiers produits contre la specification jointe. Tache: <tache>.' --file <spec> <fichiers produits> ; echo __FIN_verif_$?__`. Il ecrit `.worker-out/<tache>.verif.md`. Si ce fichier est absent, le verificateur a echoue.
+- Ne jamais utiliser le chemin renvoye par le verificateur ou un worker : lire toi-meme le chemin attendu, `.worker-out/<tache>.verif.md` a la racine du projet.
+- Lire le rapport au lieu du rendu complet. Executer toi-meme les commandes qu'il liste.
+- Controle anti-complaisance : verifier toi-meme au moins une exigence marquee OK. Si elle est fausse, ignorer le rapport et tout verifier.
+- Le rapport ne remplace jamais la verification mecanique.
+
+## Verification finale
+
+- Tache critique (securite, secrets, irreversible, infra de production) : verification finale par le sous-agent `critical-reviewer`. Sinon, verification mecanique toi-meme, sans lui.
+- Rejouer toi-meme la verification mecanique. Ne jamais croire un worker ou le verificateur sur parole.
+- Si `degraded.log` a augmente pendant la delegation, un modele degrade a repondu : verifier plus strictement et le signaler a l'utilisateur.
+- Echec : un prompt correctif nommant l'erreur exacte. Deuxieme echec : redecouper la tache ou la reprendre toi-meme. Deux echecs sur le meme type de tache : ne plus deleguer ce type pour la session.
+- Fermer les panes que tu as crees quand leur tache est validee.

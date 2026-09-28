@@ -1,0 +1,82 @@
+{
+  "ui": {
+    "autoModeAcknowledged": true
+  },
+  "modelProviders": {
+    "openai": [
+      {
+        "id": "GLM-5.2",
+        "name": "[Z.AI] GLM-5.2",
+        "baseUrl": "https://api.z.ai/api/paas/v4",
+        "envKey": "ZAI_API_KEY",
+        "generationConfig": {
+          "extra_body": {
+            "enable_thinking": true
+          },
+          "contextWindowSize": 1000000
+        }
+      },
+      {
+        "id": "GLM-5.1",
+        "name": "[Z.AI] GLM-5.1",
+        "baseUrl": "https://api.z.ai/api/paas/v4",
+        "envKey": "ZAI_API_KEY",
+        "generationConfig": {
+          "extra_body": {
+            "enable_thinking": true
+          },
+          "contextWindowSize": 204800
+        }
+      },
+      {
+        "id": "GLM-5",
+        "name": "[Z.AI] GLM-5",
+        "baseUrl": "https://api.z.ai/api/paas/v4",
+        "envKey": "ZAI_API_KEY",
+        "generationConfig": {
+          "contextWindowSize": 204800
+        }
+      },
+      {
+        "id": "GLM-5-Turbo",
+        "name": "[Z.AI] GLM-5-Turbo",
+        "baseUrl": "https://api.z.ai/api/paas/v4",
+        "envKey": "ZAI_API_KEY",
+        "generationConfig": {
+          "contextWindowSize": 204800
+        }
+      },
+      {
+        "id": "glm-5.3",
+        "name": "[Z.AI] glm-5.3",
+        "baseUrl": "https://api.z.ai/api/paas/v4",
+        "envKey": "ZAI_API_KEY",
+        "generationConfig": {
+          "extra_body": {
+            "enable_thinking": true
+          },
+          "contextWindowSize": 1000000
+        }
+      }
+    ]
+  },
+  "security": {
+    "auth": {
+      "selectedType": "openai"
+    },
+    "folderTrust": {
+      "enabled": true
+    }
+  },
+  "model": {
+    "name": "glm-5.3",
+    "baseUrl": ""
+  },
+  "providerMetadata": {
+    "zai": {
+      "version": "97fdcee07cac46db3f6dd389cfea1a45ad3bd9f798bb5068fd6adaa69e536a93",
+      "baseUrl": "https://api.z.ai/api/paas/v4"
+    }
+  },
+  "$version": 4
+}

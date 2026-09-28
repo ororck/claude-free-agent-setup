@@ -1,0 +1,39 @@
+# AgentHUD user settings.
+# App-managed state (hidden sessions/projects) lives in state.yaml.
+
+# How often to poll for activity updates
+refreshInterval: 2s
+
+# Activity filter presets (cycle with 'f' key in viewer)
+# Each list is one preset. Use "all" (or "*") to show everything.
+# Types: response, user, bash, edit, thinking, read, glob, commit
+filterPresets:
+  - ["user", "response", "bash", "edit"]
+  - ["bash", "edit"]
+  - ["user", "response"]
+  - ["commit"]
+  - ["all"]
+
+# Defaults for `agenthud report` (CLI flags still win per-invocation).
+# include: activity types to keep. Types: user, response, bash, edit,
+#          thinking, read, glob, task.
+# detailLimit: max chars per activity detail (0 = unlimited).
+# withGit: merge git commits from each session's project.
+# format: markdown | json.
+report:
+  include: [user, response, bash, edit, thinking, task]
+  detailLimit: 120
+  withGit: false
+  format: markdown
+
+# Defaults for `agenthud summary`. Any field omitted here is inherited
+# from `report` above. `model` is summary-specific, forwarded to the
+# engine's model flag (e.g. sonnet, gpt-5, or a full model id).
+# `engine` selects which agent CLI synthesizes the summary:
+#   auto (default) → first installed of claude, codex, kiro
+#   claude | codex | kiro → force that one
+summary:
+  withGit: true
+  detailLimit: 0
+  # engine: auto
+  # model: sonnet

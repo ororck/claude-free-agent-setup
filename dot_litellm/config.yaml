@@ -1,0 +1,174 @@
+model_list:
+- model_name: worker-a
+  litellm_params:
+    model: openai/nvidia/nemotron-3-ultra-550b-a55b:free
+    api_base: https://api.kilo.ai/api/gateway
+    api_key: os.environ/KILO_API_KEY
+- model_name: worker-b
+  litellm_params:
+    model: groq/qwen/qwen3.8-27b
+    api_key: os.environ/GROQ_API_KEY
+- model_name: worker-c
+  litellm_params:
+    model: openai/gemma4:31b
+    api_base: https://ollama.com/v1
+    api_key: os.environ/OLLAMA_API_KEY
+- model_name: worker-d
+  litellm_params:
+    model: openai/stepfun/step-3.7-flash:free
+    api_base: https://api.kilo.ai/api/gateway
+    api_key: os.environ/KILO_API_KEY
+- model_name: verifier
+  litellm_params:
+    model: gemini/gemini-3.5-flash-lite
+    api_key: os.environ/GEMINI_API_KEY
+- model_name: or-nemotron-ultra
+  litellm_params:
+    model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+    api_key: os.environ/OPENROUTER_API_KEY
+- model_name: gemini-flash
+  litellm_params:
+    model: gemini/gemini-3.6-flash
+    api_key: os.environ/GEMINI_API_KEY
+- model_name: ol-gemma4
+  litellm_params:
+    model: openai/gemma4:31b
+    api_base: https://ollama.com/v1
+    api_key: os.environ/OLLAMA_API_KEY
+- model_name: ol-nemotron-super
+  litellm_params:
+    model: openai/nemotron-3-super
+    api_base: https://ollama.com/v1
+    api_key: os.environ/OLLAMA_API_KEY
+- model_name: cf-nemotron-super
+  litellm_params:
+    model: openai/@cf/nvidia/nemotron-3-120b-a12b
+    api_base: https://api.cloudflare.com/client/v4/accounts/c576936212c30babbf28ee88d54e4fad/ai/v1
+    api_key: os.environ/CLOUDFLARE_API_TOKEN
+- model_name: groq-gpt-oss-120b
+  litellm_params:
+    model: groq/openai/gpt-oss-120b
+    api_key: os.environ/GROQ_API_KEY
+- model_name: cf-gpt-oss-120b
+  litellm_params:
+    model: openai/@cf/openai/gpt-oss-120b
+    api_base: https://api.cloudflare.com/client/v4/accounts/c576936212c30babbf28ee88d54e4fad/ai/v1
+    api_key: os.environ/CLOUDFLARE_API_TOKEN
+- model_name: ol-gpt-oss-120b
+  litellm_params:
+    model: openai/gpt-oss:120b
+    api_base: https://ollama.com/v1
+    api_key: os.environ/OLLAMA_API_KEY
+- model_name: kilo-step
+  litellm_params:
+    model: openai/stepfun/step-3.7-flash:free
+    api_base: https://api.kilo.ai/api/gateway
+    api_key: os.environ/KILO_API_KEY
+- model_name: zai-glm-4.7
+  litellm_params:
+    model: zai/glm-4.7-flash
+    api_key: os.environ/ZAI_API_KEY
+- model_name: mistral-codestral
+  litellm_params:
+    model: mistral/codestral-latest
+    api_key: os.environ/MISTRAL_API_KEY
+- model_name: cohere-command-a
+  litellm_params:
+    model: openai/command-a-03-2025
+    api_base: https://api.cohere.ai/compatibility/v1
+    api_key: os.environ/COHERE_API_KEY
+- model_name: groq-gpt-oss-20b
+  litellm_params:
+    model: groq/openai/gpt-oss-20b
+    api_key: os.environ/GROQ_API_KEY
+- model_name: ol-gpt-oss-20b
+  litellm_params:
+    model: openai/gpt-oss:20b
+    api_base: https://ollama.com/v1
+    api_key: os.environ/OLLAMA_API_KEY
+- model_name: ol-nemotron-nano
+  litellm_params:
+    model: openai/nemotron-3-nano:30b
+    api_base: https://ollama.com/v1
+    api_key: os.environ/OLLAMA_API_KEY
+- model_name: zai-glm-4.5
+  litellm_params:
+    model: zai/glm-4.5-flash
+    api_key: os.environ/ZAI_API_KEY
+- model_name: cf-llama-3.3
+  litellm_params:
+    model: openai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
+    api_base: https://api.cloudflare.com/client/v4/accounts/c576936212c30babbf28ee88d54e4fad/ai/v1
+    api_key: os.environ/CLOUDFLARE_API_TOKEN
+- model_name: pollinations
+  litellm_params:
+    model: openai/openai
+    api_base: https://text.pollinations.ai/openai
+    api_key: none
+litellm_settings:
+  drop_params: true
+  callbacks: degrade_alert.proxy_handler_instance
+router_settings:
+  enable_pre_call_checks: true
+  num_retries: 1
+  allowed_fails: 3
+  retry_policy:
+    RateLimitErrorRetries: 0
+  cooldown_time: 600
+  fallbacks:
+  - worker-a:
+    - or-nemotron-ultra
+    - gemini-flash
+    - ol-nemotron-super
+    - cf-gpt-oss-120b
+    - kilo-step
+    - zai-glm-4.7
+    - mistral-codestral
+    - cohere-command-a
+    - ol-nemotron-nano
+    - zai-glm-4.5
+    - cf-llama-3.3
+    - pollinations
+  - worker-b:
+    - gemini-flash
+    - ol-gemma4
+    - or-nemotron-ultra
+    - cf-nemotron-super
+    - groq-gpt-oss-120b
+    - zai-glm-4.7
+    - mistral-codestral
+    - groq-gpt-oss-20b
+    - zai-glm-4.5
+    - cf-llama-3.3
+    - pollinations
+  - worker-c:
+    - mistral-codestral
+    - gemini-flash
+    - or-nemotron-ultra
+    - cf-nemotron-super
+    - ol-gpt-oss-120b
+    - kilo-step
+    - zai-glm-4.7
+    - cohere-command-a
+    - ol-gpt-oss-20b
+    - zai-glm-4.5
+    - cf-llama-3.3
+    - pollinations
+  - worker-d:
+    - groq-gpt-oss-120b
+    - gemini-flash
+    - cf-gpt-oss-120b
+    - ol-gpt-oss-120b
+    - or-nemotron-ultra
+    - zai-glm-4.7
+    - groq-gpt-oss-20b
+    - zai-glm-4.5
+    - cf-llama-3.3
+    - pollinations
+  - verifier:
+    - or-nemotron-ultra
+    - ol-nemotron-super
+    - groq-gpt-oss-120b
+    - cf-gpt-oss-120b
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
