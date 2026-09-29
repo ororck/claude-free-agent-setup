@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 # delegate-boN.sh : best-of-N. Meme tache sur plusieurs workers en parallele, on garde le premier qui passe le lint.
 # Si aucun ne passe, une seule passe de raffinement sur celui qui a le moins de lignes d'erreurs.
+# MIN_LIGNES (vide par defaut) : critere de conformite optionnel. Pose, un candidat en code 0 dont un livrable compte moins de
+# MIN_LIGNES lignes n'est pas gagnant et on attend les autres ; si aucun n'atteint le seuil, le plus long gagne (code 0, journal SOUS LE SEUIL).
+# DELAI_BON (300 s) : borne l'attente uniquement quand MIN_LIGNES est pose, sinon le premier valide gagne aussitot.
 # Usage (racine du depot) : delegate-boN.sh "<worker1,worker2,worker3>" <consigne.md> <livrable> [livrable...]
 set -uo pipefail
 set -m   # un groupe de processus par worker, pour pouvoir tuer worker + opencode d'un coup
 
 OUT=.worker-out
 MAX_PAR=${MAX_PAR:-3}
+GRACE=${GRACE:-5}   # secondes entre le SIGTERM et le SIGKILL aux workers restants
 LOG="$OUT/delegate.log"
+MIN_LIGNES=${MIN_LIGNES:-}
+DELAI_BON=${DELAI_BON:-300}
+case "$MIN_LIGNES" in ''|*[!0-9]*) [ -z "$MIN_LIGNES" ] || { echo "ECHEC : MIN_LIGNES doit etre un entier"; exit 1; } ;; esac
+limite_bon=$((SECONDS + DELAI_BON))
 
 [ $# -ge 3 ] || { echo 'Usage : delegate-boN.sh "<worker1,worker2,...>" <consigne.md> <livrable>...'; exit 1; }
 liste="$1"; consigne="$2"; shift 2
@@ -45,10 +53,24 @@ nettoyer_wt() {
   rm -rf "$WTROOT/$(basename "$PWD")-$tache-"*
   git worktree prune >/dev/null 2>&1
 }
-tuer_restants() {
+# Le sous-shell d'un worker peut mourir avant son opencode : le groupe de
+# processus vit encore avec des orphelins, que jobs/wait ne voient pas.
+groupe_vivant() {
   local w
   for w in "${workers[@]}"; do
+    [ -n "${pid[$w]:-}" ] && kill -0 -- "-${pid[$w]}" 2>/dev/null && return 0
+  done
+  return 1
+}
+tuer_restants() {
+  local w limite
+  for w in "${workers[@]}"; do
     [ -n "${pid[$w]:-}" ] && kill -TERM -- "-${pid[$w]}" 2>/dev/null
+  done
+  limite=$((SECONDS + GRACE))
+  while [ "$SECONDS" -lt "$limite" ] && groupe_vivant; do sleep 0.2; done
+  for w in "${workers[@]}"; do
+    [ -n "${pid[$w]:-}" ] && kill -0 -- "-${pid[$w]}" 2>/dev/null && kill -KILL -- "-${pid[$w]}" 2>/dev/null
   done
   wait 2>/dev/null
 }
@@ -56,25 +78,59 @@ tuer_restants() {
 sortie() { tuer_restants; nettoyer_wt; }
 trap sortie EXIT
 
+# Lignes d'un candidat (code 0) : "<min sur les livrables> <total>". Worktree ou livrable absent = 0.
+lignes_de() {
+  local wt f n min="" tot=0
+  wt=$(tail -1 "$(resumef "$1")" 2>/dev/null)
+  for f in "${livrables[@]}"; do
+    n=0; [ -f "$wt/$f" ] && n=$(wc -l < "$wt/$f")
+    tot=$((tot + n)); if [ -z "$min" ] || [ "$n" -lt "$min" ]; then min=$n; fi
+  done
+  echo "${min:-0} $tot"
+}
 cherche_gagnant() {
-  local w
+  local w min tot
   for w in "${workers[@]}"; do
-    [ "$(cat "$(exitf "$w")" 2>/dev/null)" = 0 ] && { gagnant="$w"; return 0; }
+    [ "$(cat "$(exitf "$w")" 2>/dev/null)" = 0 ] || continue
+    if [ -n "$MIN_LIGNES" ]; then
+      read -r min tot < <(lignes_de "$w")
+      [ "$min" -ge "$MIN_LIGNES" ] || continue
+    fi
+    gagnant="$w"; return 0
   done
   return 1
 }
+# Attend la fin d'un worker. Avec MIN_LIGNES, on scrute pour pouvoir respecter DELAI_BON (wait -n ne peut pas expirer).
+attendre_fin() {
+  if [ -z "$MIN_LIGNES" ]; then wait -n 2>/dev/null; return 0; fi
+  local avant; avant=$(jobs -rp | wc -l)
+  while [ "$(jobs -rp | wc -l)" -ge "$avant" ] && [ "$SECONDS" -lt "$limite_bon" ]; do sleep 0.2; done
+}
+delai_bon_ecoule() { [ -n "$MIN_LIGNES" ] && [ "$SECONDS" -ge "$limite_bon" ]; }
 
 for w in "${workers[@]}"; do
   [ -z "$w" ] && continue
-  while [ "$(jobs -rp | wc -l)" -ge "$MAX_PAR" ]; do wait -n 2>/dev/null; cherche_gagnant && break 2; done
+  while [ "$(jobs -rp | wc -l)" -ge "$MAX_PAR" ]; do attendre_fin; cherche_gagnant && break 2; delai_bon_ecoule && break 2; done
   ( SUFFIXE=".$(tag "$w")" MAX_ESSAIS=1 COPIER=0 delegate.sh "$w" "$consigne" "${livrables[@]}" > "$(resumef "$w")" 2>&1
     echo $? > "$(exitf "$w")" ) &
   pid[$w]=$!
   journal "LANCE $w"
   cherche_gagnant && break
 done
-while [ -z "$gagnant" ] && [ "$(jobs -rp | wc -l)" -gt 0 ]; do wait -n 2>/dev/null; cherche_gagnant; done
+while [ -z "$gagnant" ] && [ "$(jobs -rp | wc -l)" -gt 0 ] && ! delai_bon_ecoule; do attendre_fin; cherche_gagnant; done
 [ -z "$gagnant" ] && cherche_gagnant
+
+# MIN_LIGNES : personne n'atteint le seuil (tous finis, ou DELAI_BON ecoule). On departage les candidats deja arrives : le plus de lignes.
+sous_seuil=0
+if [ -z "$gagnant" ] && [ -n "$MIN_LIGNES" ]; then
+  tuer_restants
+  n_max=-1
+  for w in "${workers[@]}"; do
+    [ "$(cat "$(exitf "$w")" 2>/dev/null)" = 0 ] || continue
+    read -r _ tot < <(lignes_de "$w")
+    if [ "$tot" -gt "$n_max" ]; then n_max=$tot; gagnant="$w"; sous_seuil=1; fi
+  done
+fi
 
 if [ -n "$gagnant" ]; then
   tuer_restants
@@ -85,8 +141,17 @@ if [ -n "$gagnant" ]; then
   done
   for f in "${livrables[@]}"; do mkdir -p "$(dirname "$f")"; cp -p "$wt/$f" "$f"; done
   git diff --no-color -- "${livrables[@]}" > "$OUT/$tache.diff" 2>/dev/null
-  journal "OK gagnant $gagnant"
-  echo "OK $tache (best-of-${#workers[@]}, gagnant $gagnant)"
+  info=""; msg_seuil=""
+  if [ -n "$MIN_LIGNES" ]; then
+    read -r _ tot < <(lignes_de "$gagnant")
+    info=" ($tot lignes)"
+    if [ "$sous_seuil" = 1 ]; then
+      journal "SOUS LE SEUIL gagnant $gagnant $tot lignes sur $MIN_LIGNES"
+      msg_seuil=", SOUS LE SEUIL : $tot lignes sur $MIN_LIGNES"
+    fi
+  fi
+  journal "OK gagnant $gagnant$info"
+  echo "OK $tache (best-of-${#workers[@]}, gagnant $gagnant$msg_seuil)"
   exit 0
 fi
 

@@ -102,7 +102,7 @@ fichiers=(--file "$WT/$OUT/$tache.consigne.md")
 
 # Retour arriere : on garde le meilleur essai (moins de livrables en echec, puis moins de lignes d'erreurs).
 # Un essai strictement pire est annule avant le suivant, et la sortie recopie toujours depuis le meilleur.
-best_sha=""; best_score=""; best_erreurs=""
+best_sha=""; best_score=""; best_erreurs=""; nb_changes=0
 sur_meilleur() { [ "$(git -C "$WT" rev-parse HEAD)" = "$best_sha" ] || git -C "$WT" checkout -q --detach "$best_sha"; }
 recopier_meilleur() {
   sur_meilleur
@@ -120,6 +120,13 @@ for essai in $(seq 1 "$MAX_ESSAIS"); do
   if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
     journal "TIMEOUT essai $essai"; echo "ECHEC $tache : delai depasse (essai $essai)"; exit 12
   fi
+  # Un essai qui ne change rien dans le worktree est un ECHEC, quel que soit le lint : le livrable du commit
+  # de base passerait le lint sans que le worker ait travaille (timeout fournisseur, plantage). Un worker qui juge
+  # legitimement qu'il n'y a rien a corriger est indiscernable d'un plantage, donc echoue aussi.
+  if [ -z "$(git -C "$WT" status --porcelain -- . ":(exclude)$OUT")" ]; then
+    journal "AUCUN CHANGEMENT essai $essai"; continue
+  fi
+  nb_changes=$((nb_changes+1))
   erreurs=""; nb_ko=0
   for f in "${livrables[@]}"; do
     if [ ! -s "$WT/$f" ]; then erreurs+="$f : fichier absent ou vide"$'\n'; nb_ko=$((nb_ko+1)); continue; fi
@@ -149,6 +156,11 @@ for essai in $(seq 1 "$MAX_ESSAIS"); do
   fichiers=(--file "$WT/$OUT/$tache.consigne.md" --file "$WT/$OUT/$tache.erreurs.txt")
   for f in "${livrables[@]}"; do [ -s "$WT/$f" ] && fichiers+=(--file "$WT/$f"); done
 done
+if [ "$nb_changes" -eq 0 ]; then
+  journal "ECHEC aucun changement produit apres $MAX_ESSAIS essais"
+  echo "ECHEC $tache : aucun changement produit par le worker apres $MAX_ESSAIS essais, rien recopie"
+  exit 2
+fi
 recopier_meilleur
 journal "ECHEC apres $MAX_ESSAIS essais"
 echo "ECHEC $tache apres $MAX_ESSAIS essais : voir $ERR_FILE"

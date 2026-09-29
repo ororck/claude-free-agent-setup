@@ -10,4 +10,4 @@ printf '%s\n' "$sortie" | grep -Ev '^ok ' # le detail des cas reussis est masque
 total=$(printf '%s\n' "$sortie" | grep -cE '^(not )?ok ')
 echec=$(printf '%s\n' "$sortie" | grep -c '^not ok ')
 echo "=== $total cas, $echec en echec"
-[ "$code" -eq 0 ] && [ "$echec" -eq 0 ] && [ "$total" -ge 36 ]
+[ "$code" -eq 0 ] && [ "$echec" -eq 0 ] && [ "$total" -ge 98 ]

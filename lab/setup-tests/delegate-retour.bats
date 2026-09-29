@@ -71,6 +71,21 @@ setup_file() {
   essai cas8 2 a.sh "$CASSE";  essai cas8 2 b.sh "$CASSE"; essai cas8 2 extra.txt "pollution"
   mkdir -p "$T/cas8-fake/essai-3"
   lancer cas8 3
+
+  # cas9 : les livrables existent deja et passent le lint, mais le worker n'ecrit rien (timeout fournisseur, plantage). Ce doit etre un echec.
+  depot cas9
+  printf '%s' "$VALIDE" > "$T/cas9/a.sh"; printf '%s' "$VALIDE" > "$T/cas9/b.sh"
+  git -C "$T/cas9" add -A && git -C "$T/cas9" -c user.name=t -c user.email=t@l commit -qm livrables
+  mkdir -p "$T/cas9-fake/essai-1" "$T/cas9-fake/essai-2"
+  lancer cas9 2
+
+  # cas10 : essai 1 ne change rien, essai 2 modifie a.sh : reussite a l'essai 2.
+  depot cas10
+  printf '%s' "$VALIDE" > "$T/cas10/a.sh"; printf '%s' "$VALIDE" > "$T/cas10/b.sh"
+  git -C "$T/cas10" add -A && git -C "$T/cas10" -c user.name=t -c user.email=t@l commit -qm livrables
+  mkdir -p "$T/cas10-fake/essai-1"
+  essai cas10 2 a.sh $'#!/usr/bin/env bash\necho corrige\n'
+  lancer cas10 2
 }
 
 @test "retour arriere : sortie 2 quand l'essai 2 est pire et que rien ne passe" {
@@ -157,4 +172,26 @@ setup_file() {
   grep -q 'b.sh :' "$T/cas8/.worker-out/c.erreurs.txt"
   run grep -c 'a.sh :' "$T/cas8/.worker-out/c.erreurs.txt"
   [ "$output" -eq 0 ]
+}
+
+@test "aucun changement : le worker n'ecrit rien alors que les livrables passent le lint : sortie 2, pas 0" {
+  [ "$(cat "$T/cas9.code")" -eq 2 ]
+}
+
+@test "aucun changement : aucun OK dans delegate.log, un AUCUN CHANGEMENT par essai" {
+  run grep -c ' OK ' "$T/cas9/.worker-out/delegate.log"
+  [ "$output" -eq 0 ]
+  [ "$(grep -c 'AUCUN CHANGEMENT' "$T/cas9/.worker-out/delegate.log")" -eq 2 ]
+}
+
+@test "aucun changement : message explicite et rien recopie" {
+  grep -q 'aucun changement produit par le worker' "$T/cas9/sortie.txt"
+  [ ! -e "$T/cas9/.worker-out/c.diff" ]
+}
+
+@test "aucun changement a l'essai 1, changement a l'essai 2 : reussite a l'essai 2" {
+  [ "$(cat "$T/cas10.code")" -eq 0 ]
+  grep -q 'AUCUN CHANGEMENT essai 1' "$T/cas10/.worker-out/delegate.log"
+  grep -q 'OK essai 2' "$T/cas10/.worker-out/delegate.log"
+  grep -q corrige "$T/cas10/a.sh"
 }
