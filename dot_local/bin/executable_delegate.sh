@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# delegate.sh v5 : worker isole dans un git worktree, lint, relances, recopie des seuls livrables
+# delegate.sh v6 : worker isole dans un git worktree, lint, relances, recopie des seuls livrables
 # Usage (racine du depot) : delegate.sh <worker|provider/modele> <consigne.md> <livrable> [livrable...]
 set -uo pipefail
 
 MAX_ESSAIS=${MAX_ESSAIS:-3}
 DELAI=${DELAI:-900}
+# COPIER=0 : valide et lint sans recopier ; en cas de reussite le worktree est conserve et son chemin est la derniere ligne affichee.
+COPIER=${COPIER:-1}
+# SUFFIXE (ex. .worker-a) : insere avant l'extension dans les fichiers ecrits dans $OUT, pour que des workers paralleles ne s'ecrasent pas.
+SUFFIXE=${SUFFIXE:-}
 OUT=.worker-out
-LOG="$OUT/delegate.log"
+LOG="$OUT/delegate$SUFFIXE.log"
 SENSIBLE='^(secrets|infra)/|(^|/)\.env$|(^|/)\.env\.|\.tfstate|\.tfvars|\.pem$|\.key$|\.p12$|\.pfx$|(^|/)id_rsa|(^|/)id_ed25519|(^|/)kubeconfig$|(^|/)\.kube/'
 SENSIBLE_OK='(^|/)(\.env\.example|\.envrc)$'
 
@@ -14,6 +18,7 @@ SENSIBLE_OK='(^|/)(\.env\.example|\.envrc)$'
 worker="$1"; consigne="$2"; shift 2
 case "$worker" in */*) modele="$worker" ;; *) modele="litellm/$worker" ;; esac
 tache="$(basename "$consigne" .md)"; tache="${tache%.prompt}"
+RUN_LOG="$OUT/$tache.run$SUFFIXE.log"; ERR_FILE="$OUT/$tache.erreurs$SUFFIXE.txt"; DIFF_FILE="$OUT/$tache$SUFFIXE.diff"
 mkdir -p "$OUT"
 journal() { printf '%s %s %s %s\n' "$(date +%T)" "$worker" "$tache" "$1" >> "$LOG"; }
 
@@ -39,13 +44,14 @@ fi
 racine=$(pwd)
 WT="${TMPDIR:-/tmp}/delegate-wt/$(basename "$racine")-$tache-$$"
 # shellcheck disable=SC2329  # appelee par trap
-nettoyer() { git -C "$racine" worktree remove --force "$WT" >/dev/null 2>&1; git -C "$racine" worktree prune >/dev/null 2>&1; }
+nettoyer() { [ "${garder:-0}" = 1 ] && return 0; git -C "$racine" worktree remove --force "$WT" >/dev/null 2>&1; git -C "$racine" worktree prune >/dev/null 2>&1; }
 trap nettoyer EXIT
 mkdir -p "$(dirname "$WT")"
 git worktree add -q --detach "$WT" HEAD 2>/dev/null || { echo "ECHEC $tache : creation du worktree impossible"; exit 1; }
 printf '%s\n' "$liste" | grep -v '^$' | while IFS= read -r f; do [ -e "$f" ] && cp --parents -p "$f" "$WT/"; done
 mkdir -p "$WT/$OUT" && cp "$consigne" "$WT/$OUT/$tache.consigne.md"
 git -C "$WT" add -A >/dev/null && git -C "$WT" -c user.name=delegate -c user.email=delegate@local commit -qm base --allow-empty
+base_sha=$(git -C "$WT" rev-parse HEAD)
 
 KC_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/kubeconform"; mkdir -p "$KC_CACHE"
 KL_CHECKS="run-as-non-root,unset-cpu-requirements,unset-memory-requirements,latest-tag"
@@ -93,31 +99,57 @@ lint() {
 
 msg="Execute la consigne jointe. Ecris uniquement les fichiers demandes."
 fichiers=(--file "$WT/$OUT/$tache.consigne.md")
+
+# Retour arriere : on garde le meilleur essai (moins de livrables en echec, puis moins de lignes d'erreurs).
+# Un essai strictement pire est annule avant le suivant, et la sortie recopie toujours depuis le meilleur.
+best_sha=""; best_score=""; best_erreurs=""
+sur_meilleur() { [ "$(git -C "$WT" rev-parse HEAD)" = "$best_sha" ] || git -C "$WT" checkout -q --detach "$best_sha"; }
+recopier_meilleur() {
+  sur_meilleur
+  [ "$COPIER" = 0 ] && return 0
+  for f in "${livrables[@]}"; do
+    [ -s "$WT/$f" ] || continue
+    mkdir -p "$(dirname "$f")"; cp -p "$WT/$f" "$f"
+  done
+  git diff --no-color -- "${livrables[@]}" > "$DIFF_FILE" 2>/dev/null
+}
+
 for essai in $(seq 1 "$MAX_ESSAIS"); do
-  ( cd "$WT" && timeout -k 30 "$DELAI" opencode run -m "$modele" "$msg" "${fichiers[@]}" ) >> "$OUT/$tache.run.log" 2>&1
+  ( cd "$WT" && timeout -k 30 "$DELAI" opencode run -m "$modele" "$msg" "${fichiers[@]}" ) >> "$RUN_LOG" 2>&1
   code=$?
   if [ "$code" -eq 124 ] || [ "$code" -eq 137 ]; then
     journal "TIMEOUT essai $essai"; echo "ECHEC $tache : delai depasse (essai $essai)"; exit 12
   fi
-  erreurs=""
+  erreurs=""; nb_ko=0
   for f in "${livrables[@]}"; do
-    if [ ! -s "$WT/$f" ]; then erreurs+="$f : fichier absent ou vide"$'\n'; continue; fi
+    if [ ! -s "$WT/$f" ]; then erreurs+="$f : fichier absent ou vide"$'\n'; nb_ko=$((nb_ko+1)); continue; fi
     [ -n "$(tail -c1 "$WT/$f")" ] && echo >> "$WT/$f"
-    sortie="$(cd "$WT" && lint "$f" 2>&1)" || erreurs+="$f :"$'\n'"$sortie"$'\n'
+    sortie="$(cd "$WT" && lint "$f" 2>&1)" || { erreurs+="$f :"$'\n'"$sortie"$'\n'; nb_ko=$((nb_ko+1)); }
   done
-  if [ -z "$erreurs" ]; then
-    for f in "${livrables[@]}"; do mkdir -p "$(dirname "$f")"; cp -p "$WT/$f" "$f"; done
-    git diff --no-color -- "${livrables[@]}" > "$OUT/$tache.diff" 2>/dev/null
-    jetes=$(git -C "$WT" status --porcelain --untracked-files=all | awk '{print $NF}' | grep -v "^$OUT/" | grep -vxF -f <(printf '%s\n' "${livrables[@]}") | tr '\n' ' ')
-    journal "OK essai $essai${jetes:+ (jetes: $jetes)}"
-    echo "OK $tache ($essai essai(s))${jetes:+ | hors livrables jetes : $jetes}"; exit 0
+  erreurs=$(printf '%s' "$erreurs" | head -40)
+  score=$((nb_ko * 1000 + $(printf '%s' "$erreurs" | grep -c '')))
+  git -C "$WT" add -A >/dev/null && git -C "$WT" -c user.name=delegate -c user.email=delegate@local commit -qm "essai $essai" --allow-empty
+  if [ -z "$best_sha" ] || [ "$score" -le "$best_score" ]; then
+    best_sha=$(git -C "$WT" rev-parse HEAD); best_score=$score; best_erreurs=$erreurs
+  else
+    journal "ANNULE essai $essai (score $score, meilleur $best_score)"
+    sur_meilleur
   fi
-  printf '%s' "$erreurs" | head -40 > "$OUT/$tache.erreurs.txt"; cp "$OUT/$tache.erreurs.txt" "$WT/$OUT/"
+  if [ -z "$erreurs" ]; then
+    recopier_meilleur
+    jetes=$(git -C "$WT" diff --name-only "$base_sha" HEAD | grep -v "^$OUT/" | grep -vxF -f <(printf '%s\n' "${livrables[@]}") | tr '\n' ' ')
+    journal "OK essai $essai${jetes:+ (jetes: $jetes)}"
+    echo "OK $tache ($essai essai(s))${jetes:+ | hors livrables jetes : $jetes}"
+    [ "$COPIER" = 0 ] && { garder=1; echo "$WT"; }
+    exit 0
+  fi
+  printf '%s\n' "$best_erreurs" > "$ERR_FILE"; cp "$ERR_FILE" "$WT/$OUT/$tache.erreurs.txt"
   journal "ERREURS essai $essai"
   msg="Corrige uniquement les erreurs du fichier joint $tache.erreurs.txt. Ne change aucune valeur fonctionnelle (port, replicas, image, version) pour satisfaire un linter. Si une correction exige une valeur absente de la consigne, laisse l'erreur."
   fichiers=(--file "$WT/$OUT/$tache.consigne.md" --file "$WT/$OUT/$tache.erreurs.txt")
   for f in "${livrables[@]}"; do [ -s "$WT/$f" ] && fichiers+=(--file "$WT/$f"); done
 done
+recopier_meilleur
 journal "ECHEC apres $MAX_ESSAIS essais"
-echo "ECHEC $tache apres $MAX_ESSAIS essais : voir $OUT/$tache.erreurs.txt"
+echo "ECHEC $tache apres $MAX_ESSAIS essais : voir $ERR_FILE"
 exit 2
