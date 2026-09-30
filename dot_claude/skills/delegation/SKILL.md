@@ -12,6 +12,7 @@ Dockerfiles, manifestes Kubernetes, kustomize et workflows CI se generent avec l
 
 ## Couches, par ordre de preference
 1. Workers externes gratuits : OpenCode en headless via `delegate.sh`, modele via LiteLLM local.
+   Pour les taches ou le lint suffit a prouver le resultat, `delegate-boN.sh` a la place (voir Best-of-N).
 2. Sous-agents natifs, seulement si les workers externes sont indisponibles : Explore, spec-writer, doc-writer (haiku), implementer (sonnet).
 
 ## Avant de deleguer
@@ -33,6 +34,25 @@ Kustomize : la base va dans `k8s/base/`, `k8s/kustomization.yaml` pointe `base`,
 - worker-b : redaction, documentation, le reste
 Quatre taches maximum par round, une par worker. Jamais deux taches pour le meme worker dans un round, jamais plus de quatre lignes dans plan.txt. Taches restantes : rounds suivants.
 
+## Best-of-N
+`delegate-boN.sh "<worker1,worker2,worker3>" <consigne.md> <livrable>...` lance la meme
+tache sur plusieurs workers en parallele et garde le premier qui passe le lint.
+Trois workers, jamais plus, `MAX_PAR` vaut 3.
+
+Quand l'utiliser. Livrable dont la conformite se prouve mecaniquement, script Python,
+manifeste Kubernetes, Dockerfile, workflow CI, fichier de configuration. Mesure faite
+sur le projet Orion, trois reussites en moins d'une minute sur ce type de tache.
+
+Quand ne PAS l'utiliser tel quel. Documentation longue et redaction. Le lint ne compte
+ni les lignes ni les sections, donc le plus rapide gagne meme s'il est incomplet.
+Sur Orion, trois lancements successifs ont rendu 147 puis 194 lignes la ou 250 etaient
+demandees. Dans ce cas, poser `MIN_LIGNES=<seuil>` : un candidat sous le seuil n'est
+pas retenu et le script attend les autres. `DELAI_BON`, defaut 300 secondes, borne
+l'attente.
+
+Une tache best-of-N occupe trois workers, donc elle compte pour trois dans le plafond
+du round. Ne pas la melanger avec un `delegate-round.sh` en cours.
+
 ## Lancement
 1. Regles communes dans un seul fichier de spec. Dans chaque consigne `.worker-out/<tache>.prompt.md`, uniquement ce qui est propre a la tache.
 2. Ecrire `.worker-out/plan.txt`, une tache par ligne : `<worker> <consigne.md> <livrable> [livrable...]`. Puis lancer en UNE commande Bash avec `run_in_background: true`, depuis la racine du projet :
@@ -45,7 +65,7 @@ Quatre taches maximum par round, une par worker. Jamais deux taches pour le meme
 
 `delegate.sh` isole chaque worker dans un git worktree ou les fichiers ignores (secrets, tfstate) n'existent pas, ajoute le saut de ligne final, lint chaque livrable, relance le worker avec les erreurs jusqu'a 3 essais, puis recopie uniquement les livrables.
 
-Codes de sortie : 0 livrables recopies et lint OK (la ligne signale les fichiers hors livrables jetes), 1 refus (chemin interdit, fichier sensible non ignore, depot sans commit, outil manquant), 2 echec apres 3 essais (erreurs dans `.worker-out/<tache>.erreurs.txt`), 12 delai depasse. 0 prouve la forme, pas le fond.
+Codes de sortie : 0 livrables recopies et lint OK (la ligne signale les fichiers hors livrables jetes), 1 refus (chemin interdit, fichier sensible non ignore, depot sans commit, outil manquant), 2 echec apres 3 essais (erreurs dans `.worker-out/<tache>.erreurs.txt`), ou aucun essai n'a modifie quoi que ce soit dans le worktree, ce qui signale un worker en echec et non un livrable deja correct, 12 delai depasse. 0 prouve la forme, pas le fond.
 Ne lire `.worker-out/<tache>.run.log` que pour diagnostiquer un code 2 ou 12.
 
 ## Ce que les workers peuvent faire
