@@ -5,3 +5,4 @@
 **/*.pyc
 .claude/hooks/guard-secrets.audit.log
 README.md
+lab/setup-tests/bats

@@ -43,3 +43,12 @@ Pour `guard-secrets-files.bats`, `verifie 2 Read '{"file_path":"chemin/sensible"
     ~/.local/bin/delegate.sh
     ~/.local/bin/delegate-round.sh
     ~/.local/bin/delegate-boN.sh
+
+## Installation sur une machine neuve
+
+bats-core n'est pas versionne dans chezmoi, seulement les tests. Apres un
+`chezmoi apply`, installe le moteur.
+
+    git clone --depth 1 --branch v1.13.0 https://github.com/bats-core/bats-core.git ~/lab/setup-tests/bats
+
+Verifie ensuite avec `~/lab/setup-tests/run-all.sh`.
